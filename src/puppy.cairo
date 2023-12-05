@@ -138,7 +138,6 @@ use core::zeroable::Zeroable;
             self.approvals.write(token_id, to);
 
             self.emit(Approval { owner: caller, approved: to, token_id });
-
         }
 
         fn set_approval_for_all(ref self: ContractState, operator: ContractAddress, approved: bool) {
@@ -159,6 +158,7 @@ use core::zeroable::Zeroable;
             self.owners.write(token_id, to);
             self.balances.write(from, self.balances.read(from) - 1);
             self.balances.write(to, self.balances.read(to) + 1);
+            self.approvals.write(token_id, zeroable::zero());
 
             self.emit(Transfer { from, to, token_id });
         }
@@ -216,6 +216,7 @@ use core::zeroable::Zeroable;
             assert(self.owners.read(token_id) == caller, 'Unauthorized');
             self.owners.write(token_id, Zeroable::zero());
             self.balances.write(caller, self.balances.read(caller) - 1);
+            self.approvals.write(token_id, zeroable::zero());
 
             self.emit(Transfer { from: caller, to: Zeroable::zero(), token_id });
         }
