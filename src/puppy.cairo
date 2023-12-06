@@ -17,17 +17,21 @@ trait IERC721<TContractState> {
 
 #[starknet::interface]
 trait IPuppy<TContractState> {
+    fn exists(self: @TContractState, token_id: u256) -> bool;
     fn mint(ref self: TContractState) -> u256;
     fn breed(ref self: TContractState, parent_1_id: u256, parent_2_id: u256) -> u256;
     fn token_uri(self: @TContractState, token_id: u256) -> felt252;
+    fn pet(ref self: TContractState, token_id: u256);
+    fn is_alive(self: @TContractState, token_id: u256) -> bool;
+    fn max_token_id(self: @TContractState) -> u256;
+    fn bury(ref self: TContractState, token_id: u256);
 }
 
 #[starknet::contract]
 mod Puppy {
     use core::traits::Into;
-use core::zeroable::Zeroable;
+    use core::zeroable::Zeroable;
     use starknet::ContractAddress;
-    // use starknet::get_caller_address;
     use starknet::info::{get_block_number, get_caller_address, get_block_timestamp};
 
 
@@ -41,7 +45,8 @@ use core::zeroable::Zeroable;
         approvals_for_all: LegacyMap<(ContractAddress, ContractAddress), bool>,
         total_genosis_available: u256,
         current_token_id: u256,
-        random_seeds: LegacyMap<u256, felt252>
+        random_seeds: LegacyMap<u256, felt252>,
+        last_active: LegacyMap<u256, u64>
     }
 
     #[event]
@@ -150,15 +155,21 @@ use core::zeroable::Zeroable;
         }
 
         fn transfer_from(ref self: ContractState, from: ContractAddress, to: ContractAddress, token_id: u256) {
-            let caller = get_caller_address();
-            assert(caller == from, 'Unauthorized');
-            assert(from != to, 'Same address');
+            self.assert_alive(token_id);
             assert(self.owners.read(token_id) == from, 'Unauthorized');
-            assert(self.approvals.read(token_id) == caller || self.approvals_for_all.read((from, caller)), 'Unauthorized');
+            assert(from != to, 'Same address');
+
+            let caller = get_caller_address();
+            if (caller == from) {
+                assert(self.owners.read(token_id) == caller, 'Unauthorized');
+            } else {
+                assert(self.approvals.read(token_id) == caller || self.approvals_for_all.read((from, caller)), 'Unauthorized');
+            }
+
             self.owners.write(token_id, to);
             self.balances.write(from, self.balances.read(from) - 1);
             self.balances.write(to, self.balances.read(to) + 1);
-            self.approvals.write(token_id, zeroable::zero());
+            self.approvals.write(token_id, Zeroable::zero());
 
             self.emit(Transfer { from, to, token_id });
         }
@@ -178,25 +189,78 @@ use core::zeroable::Zeroable;
         }
 
         fn breed(ref self: ContractState, parent_1_id: u256, parent_2_id: u256) -> u256 {
-            let caller = get_caller_address();
-            assert(self.owners.read(parent_1_id) == caller, 'Unauthorized');
-            assert(self.owners.read(parent_2_id) == caller, 'Unauthorized');
+            self.assert_alive(parent_1_id);
+            self.assert_alive(parent_2_id);            
+            self.assert_ownership(parent_1_id);
+            self.assert_ownership(parent_2_id);
             assert(parent_1_id != parent_2_id, 'Same token');
             
+            let caller = get_caller_address();
             let random_number: u256 = (self._generate_random_number().into() + self.random_seeds.read(parent_1_id).into() + self.random_seeds.read(parent_1_id).into()) / 3;
 
             self._mint(caller, random_number.try_into().unwrap())
         }
 
         fn token_uri(self: @ContractState, token_id: u256) -> felt252 {
-            assert(!self.owners.read(token_id).is_zero(), 'Token does not exist');
+            self.assert_exists(token_id);
             
             self.random_seeds.read(token_id)
+        }
+
+        fn pet(ref self: ContractState, token_id: u256) {
+            self.assert_ownership(token_id);
+            
+            // TODO: give some reward tokens to the user for petting their pet
+
+            let current_timestamp = get_block_timestamp();
+            self.last_active.write(token_id, current_timestamp);
+        }
+
+        fn exists(self: @ContractState, token_id: u256) -> bool {
+            self.owners.read(token_id).is_zero()
+        }
+
+        fn is_alive(self: @ContractState, token_id: u256) -> bool {
+            self.assert_exists(token_id);
+
+            let last_active = self.last_active.read(token_id);
+            let current_timestamp = get_block_timestamp();
+            let time_escaped = current_timestamp - last_active;
+            let threshold = 3 * 60; // 3 minutes
+            time_escaped <= threshold
+        }
+
+        fn max_token_id(self: @ContractState) -> u256 {
+            self.current_token_id.read()
+        }
+
+        fn bury(ref self: ContractState, token_id: u256) {
+            self.assert_exists(token_id);
+            assert(!self.is_alive(token_id), 'Pet is still alive');
+
+            self._burn(token_id);
+
+            // TODO: give some reward to the user who buried the puppy 
         }
     }
 
     #[generate_trait]
     impl Private of PrivateTrait {
+        fn assert_alive(self: @ContractState, token_id: u256) {
+            assert(self.is_alive(token_id), 'Pet died');
+        }
+
+        fn assert_exists(self: @ContractState, token_id: u256) {
+            assert(self.exists(token_id), 'Pet does not exists');
+        }
+
+        fn assert_ownership(self: @ContractState, token_id: u256) {
+            self.assert_exists(token_id);
+            let caller =  get_caller_address();
+            assert(self.owners.read(token_id) == caller, 'Unauthorized');
+        }
+
+        
         fn _mint(ref self: ContractState, to: ContractAddress, random_number: felt252) -> u256 {
             assert(!to.is_zero(), 'Zero address');
             
@@ -205,6 +269,9 @@ use core::zeroable::Zeroable;
             self.owners.write(token_id, to);
             self.balances.write(to, self.balances.read(to) + 1);
             self.random_seeds.write(token_id, random_number);
+
+            let current_timestamp = get_block_timestamp();
+            self.last_active.write(token_id, current_timestamp);
 
             self.emit(Transfer { from: Zeroable::zero(), to, token_id });
 
@@ -216,7 +283,7 @@ use core::zeroable::Zeroable;
             assert(self.owners.read(token_id) == caller, 'Unauthorized');
             self.owners.write(token_id, Zeroable::zero());
             self.balances.write(caller, self.balances.read(caller) - 1);
-            self.approvals.write(token_id, zeroable::zero());
+            self.approvals.write(token_id, Zeroable::zero());
 
             self.emit(Transfer { from: caller, to: Zeroable::zero(), token_id });
         }
