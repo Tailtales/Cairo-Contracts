@@ -226,7 +226,7 @@ mod Puppy {
             let last_active = self.last_active.read(token_id);
             let current_timestamp = get_block_timestamp();
             let time_escaped = current_timestamp - last_active;
-            let threshold = 3 * 60; // 3 minutes
+            let threshold = 30 * 60; // 3 minutes
             time_escaped <= threshold
         }
 
@@ -240,7 +240,7 @@ mod Puppy {
 
             self._burn(token_id);
 
-            // TODO: give some reward to the user who buried the puppy  
+            // TODO: give some reward to the user who buried the puppy
         }
     }
 
@@ -280,7 +280,7 @@ mod Puppy {
 
         fn _burn(ref self: ContractState, token_id: u256) {
             let caller = get_caller_address();
-            assert(self.owners.read(token_id) == caller, 'Unauthorized');
+
             self.owners.write(token_id, Zeroable::zero());
             self.balances.write(caller, self.balances.read(caller) - 1);
             self.approvals.write(token_id, Zeroable::zero());
