@@ -217,7 +217,7 @@ mod Puppy {
         }
 
         fn exists(self: @ContractState, token_id: u256) -> bool {
-            self.owners.read(token_id).is_zero()
+            !self.owners.read(token_id).is_zero()
         }
 
         fn is_alive(self: @ContractState, token_id: u256) -> bool {
@@ -240,7 +240,7 @@ mod Puppy {
 
             self._burn(token_id);
 
-            // TODO: give some reward to the user who buried the puppy 
+            // TODO: give some reward to the user who buried the puppy  
         }
     }
 
